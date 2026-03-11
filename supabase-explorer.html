@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supabase Explorer</title>
+<style>
+:root {
+  --bg-dark: #1c1c1c;
+  --bg-panel: #232323;
+  --bg-sidebar: #1a1a1a;
+  --bg-header: #2a2a2a;
+  --bg-row-hover: #2d2d2d;
+  --bg-input: #333;
+  --border: #383838;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --text-bright: #fff;
+  --accent: #3ecf8e;
+  --accent-dim: #2a9d6a;
+  --danger: #e5534b;
+  --warning: #d29922;
+  --info: #539bf5;
+  --badge-bg: #333;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--bg-dark); color: var(--text); height:100vh; overflow:hidden; }
+button { cursor:pointer; border:none; font-family:inherit; }
+input, select, textarea { font-family:inherit; }
+
+/* Connection bar */
+#conn-bar {
+  display:flex; align-items:center; gap:8px; padding:8px 12px;
+  background: var(--bg-header); border-bottom:1px solid var(--border);
+}
+#conn-bar input { flex:1; padding:6px 10px; background:var(--bg-input); border:1px solid var(--border);
+  color:var(--text); border-radius:4px; font-size:13px; }
+#conn-bar input:focus { outline:none; border-color:var(--accent); }
+#conn-bar button {
+  padding:6px 16px; background:var(--accent); color:#000; font-weight:600;
+  border-radius:4px; font-size:13px;
+}
+#conn-bar button:hover { background:var(--accent-dim); }
+#conn-bar .sep { color:var(--text-dim); font-size:12px; }
+#conn-status { font-size:12px; padding:0 8px; }
+#conn-status.ok { color:var(--accent); }
+#conn-status.err { color:var(--danger); }
+
+/* Layout */
+#app { display:flex; height:calc(100vh - 41px); }
+
+/* Sidebar */
+#sidebar {
+  width:260px; min-width:200px; background:var(--bg-sidebar);
+  border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
+}
+#sidebar-header { padding:8px 12px; border-bottom:1px solid var(--border); }
+#schema-select {
+  width:100%; padding:5px 8px; background:var(--bg-input); border:1px solid var(--border);
+  color:var(--text); border-radius:4px; font-size:12px;
+}
+#table-search {
+  width:100%; padding:5px 8px; margin-top:6px; background:var(--bg-input); border:1px solid var(--border);
+  color:var(--text); border-radius:4px; font-size:12px;
+}
+#table-list { flex:1; overflow-y:auto; }
+.tbl-item {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 12px; cursor:pointer; font-size:13px; border-left:3px solid transparent;
+}
+.tbl-item:hover { background:var(--bg-row-hover); }
+.tbl-item.active { background:var(--bg-row-hover); border-left-color:var(--accent); color:var(--accent); }
+.tbl-item .count {
+  font-size:11px; color:var(--text-dim); background:var(--badge-bg);
+  padding:1px 6px; border-radius:8px;
+}
+.tbl-item .icon { margin-right:6px; font-size:11px; color:var(--text-dim); }
+#sidebar-footer {
+  padding:8px 12px; border-top:1px solid var(--border); font-size:11px; color:var(--text-dim);
+}
+
+/* RPC section in sidebar */
+.sidebar-section { padding:6px 12px; font-size:11px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-top:4px; }
+
+/* Main area */
+#main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+/* Toolbar */
+#toolbar {
+  display:flex; align-items:center; gap:8px; padding:8px 12px;
+  background:var(--bg-header); border-bottom:1px solid var(--border); flex-wrap:wrap;
+}
+#toolbar .table-name { font-size:15px; font-weight:600; color:var(--text-bright); }
+#toolbar .row-info { font-size:12px; color:var(--text-dim); }
+#filter-input {
+  flex:1; min-width:200px; padding:5px 8px; background:var(--bg-input);
+  border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:12px;
+}
+#filter-input::placeholder { color:var(--text-dim); }
+.tb-btn {
+  padding:4px 10px; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+  border-radius:4px; font-size:12px;
+}
+.tb-btn:hover { background:var(--border); }
+.tb-btn.active { border-color:var(--accent); color:var(--accent); }
+
+/* Data tab container */
+#data-tab { display:flex; flex-direction:column; flex:1; overflow:hidden; min-height:0; }
+
+/* Data grid */
+#grid-wrap { flex:1; overflow:auto; min-height:0; }
+#grid {
+  width:100%; border-collapse:collapse; font-size:13px;
+}
+#grid thead { position:sticky; top:0; z-index:2; }
+#grid th {
+  background:var(--bg-header); padding:6px 10px; text-align:left; font-weight:600;
+  border-bottom:2px solid var(--border); white-space:nowrap; cursor:pointer;
+  font-size:12px; color:var(--text-dim); user-select:none;
+}
+#grid th:hover { color:var(--text-bright); }
+#grid th .sort-arrow { margin-left:4px; font-size:10px; }
+#grid td {
+  padding:5px 10px; border-bottom:1px solid var(--border);
+  max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#grid tr:hover td { background:var(--bg-row-hover); }
+td.null-val { color:var(--text-dim); font-style:italic; }
+td.bool-val { font-weight:600; }
+td.bool-true { color:var(--accent); }
+td.bool-false { color:var(--danger); }
+td.num-val { color:var(--info); }
+td.json-val { color:var(--warning); font-family:monospace; font-size:12px; }
+
+/* Pagination */
+#pagination {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 12px; background:var(--bg-header); border-top:1px solid var(--border); font-size:12px;
+}
+#pagination button {
+  padding:3px 10px; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+  border-radius:4px; font-size:12px;
+}
+#pagination button:hover:not(:disabled) { background:var(--border); }
+#pagination button:disabled { opacity:0.4; cursor:default; }
+#page-info { color:var(--text-dim); }
+#page-size-select { padding:2px 6px; background:var(--bg-input); border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:12px; }
+
+/* Cell detail modal */
+#cell-modal {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;
+}
+#cell-modal.show { display:flex; }
+#cell-modal-content {
+  background:var(--bg-panel); border:1px solid var(--border); border-radius:8px;
+  padding:16px; max-width:700px; width:90%; max-height:80vh; overflow:auto;
+}
+#cell-modal-content pre {
+  background:var(--bg-dark); padding:12px; border-radius:4px; overflow:auto;
+  font-size:13px; color:var(--text); white-space:pre-wrap; word-break:break-all;
+}
+#cell-modal-content .close-btn {
+  float:right; background:none; color:var(--text-dim); font-size:18px; padding:0 4px;
+}
+
+/* Tabs */
+#tabs { display:flex; border-bottom:1px solid var(--border); background:var(--bg-header); }
+.tab {
+  padding:6px 16px; font-size:13px; color:var(--text-dim); cursor:pointer;
+  border-bottom:2px solid transparent;
+}
+.tab:hover { color:var(--text); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+/* RPC panel */
+#rpc-panel { display:none; padding:12px; overflow:auto; flex:1; min-height:0; }
+#rpc-panel.show { display:block; }
+#rpc-list { list-style:none; }
+#rpc-list li {
+  padding:6px 10px; font-size:13px; font-family:monospace; cursor:pointer;
+  border-bottom:1px solid var(--border);
+}
+#rpc-list li:hover { background:var(--bg-row-hover); }
+#rpc-test { margin-top:12px; }
+#rpc-test textarea {
+  width:100%; height:80px; background:var(--bg-input); border:1px solid var(--border);
+  color:var(--text); border-radius:4px; padding:8px; font-family:monospace; font-size:13px;
+}
+#rpc-output {
+  margin-top:8px; background:var(--bg-dark); padding:10px; border-radius:4px;
+  font-family:monospace; font-size:12px; max-height:300px; overflow:auto; white-space:pre-wrap;
+}
+
+/* Auth panel */
+#auth-panel { display:none; padding:12px; overflow:auto; flex:1; min-height:0; }
+#auth-panel.show { display:block; }
+#auth-panel pre { background:var(--bg-dark); padding:10px; border-radius:4px; font-size:12px; overflow:auto; white-space:pre-wrap; }
+#auth-panel input { padding:5px 8px; background:var(--bg-input); border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:13px; width:250px; }
+#auth-panel button { padding:5px 12px; background:var(--accent); color:#000; font-weight:600; border-radius:4px; font-size:13px; margin-left:6px; }
+
+/* SQL panel */
+#sql-panel { display:none; padding:12px; overflow:auto; flex:1; }
+#sql-panel.show { display:block; }
+
+/* Export bar */
+.export-btn { background:var(--info) !important; color:#fff !important; }
+
+/* Loading */
+.loading { text-align:center; padding:40px; color:var(--text-dim); }
+.spinner { display:inline-block; width:20px; height:20px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Toast */
+#toast {
+  position:fixed; bottom:20px; right:20px; background:var(--bg-panel); border:1px solid var(--border);
+  border-radius:6px; padding:10px 16px; font-size:13px; z-index:200; display:none;
+  box-shadow:0 4px 12px rgba(0,0,0,0.4);
+}
+#toast.show { display:block; }
+#toast.error { border-color:var(--danger); }
+#toast.success { border-color:var(--accent); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-track { background:var(--bg-dark); }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:#555; }
+
+/* Welcome screen */
+#welcome {
+  flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column;
+  color:var(--text-dim); font-size:14px;
+}
+#welcome h2 { color:var(--accent); margin-bottom:12px; font-size:20px; }
+#welcome .hint { font-size:12px; margin-top:8px; max-width:400px; text-align:center; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<!-- Connection bar -->
+<div id="conn-bar">
+  <input id="url-input" placeholder="https://xxxxx.supabase.co" spellcheck="false">
+  <span class="sep">|</span>
+  <input id="key-input" placeholder="anon key (eyJ...) or service_role key" spellcheck="false" style="flex:1.5">
+  <span class="sep">|</span>
+  <input id="jwt-input" placeholder="JWT token (optional — for authenticated access)" spellcheck="false" style="flex:1">
+  <button id="connect-btn" onclick="connect()">Connect</button>
+  <select id="history-select" onchange="selectHistory()" style="padding:5px 6px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-dim);border-radius:4px;font-size:12px;max-width:200px">
+    <option value="">Recent...</option>
+  </select>
+  <span id="conn-status"></span>
+</div>
+
+<!-- App layout -->
+<div id="app">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <select id="schema-select" onchange="switchSchema()">
+        <option value="public">public</option>
+        <option value="storage">storage</option>
+        <option value="auth">auth</option>
+        <option value="vault">vault</option>
+        <option value="_realtime">_realtime</option>
+        <option value="pgsodium">pgsodium</option>
+        <option value="graphql_public">graphql_public</option>
+      </select>
+      <input id="table-search" placeholder="Filter tables..." oninput="filterTables()">
+    </div>
+    <div id="table-list"></div>
+    <div id="sidebar-footer">
+      <span id="table-count">0 tables</span> · <span id="rpc-count">0 RPCs</span>
+    </div>
+  </div>
+
+  <!-- Main area -->
+  <div id="main">
+    <!-- Tabs -->
+    <div id="tabs">
+      <div class="tab active" data-tab="data" onclick="switchTab('data')">Data</div>
+      <div class="tab" data-tab="rpcs" onclick="switchTab('rpcs')">RPCs</div>
+      <div class="tab" data-tab="auth" onclick="switchTab('auth')">Auth</div>
+    </div>
+
+    <!-- Data tab -->
+    <div id="data-tab">
+      <div id="toolbar" style="display:none">
+        <span class="table-name" id="cur-table-name"></span>
+        <span class="row-info" id="cur-row-info"></span>
+        <input id="filter-input" placeholder="Filter: column=eq.value  |  email=ilike.%@gmail%  |  or=(status.eq.active,role.eq.admin)" onkeydown="if(event.key==='Enter')loadData()">
+        <button class="tb-btn" onclick="loadData()" title="Apply filter">Apply</button>
+        <button class="tb-btn" onclick="clearFilter()" title="Clear filter">Clear</button>
+        <select id="select-cols" class="tb-btn" onchange="loadData()" title="Columns">
+          <option value="*">All columns</option>
+        </select>
+        <button class="tb-btn export-btn" onclick="exportCSV()" title="Export to CSV">Export CSV</button>
+        <button class="tb-btn export-btn" onclick="exportJSON()" title="Export to JSON" style="background:var(--warning);color:#000">Export JSON</button>
+      </div>
+      <div id="grid-wrap">
+        <div id="welcome">
+          <h2>Supabase Explorer</h2>
+          <p>Enter a Supabase URL and API key to connect</p>
+          <p class="hint">
+            Supports anon keys, service_role keys, and authenticated JWTs.<br>
+            Browse tables, filter data, call RPCs, and export results.<br>
+            Works with public, storage, auth, vault, and _realtime schemas.
+          </p>
+        </div>
+        <table id="grid" style="display:none">
+          <thead id="grid-head"></thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+      <div id="pagination" style="display:none">
+        <div>
+          <button onclick="prevPage()" id="prev-btn" disabled>← Prev</button>
+          <span id="page-info">Page 1</span>
+          <button onclick="nextPage()" id="next-btn">Next →</button>
+        </div>
+        <div>
+          Rows per page:
+          <select id="page-size-select" onchange="changePageSize()">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+          <span id="total-rows" style="margin-left:8px"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RPC tab -->
+    <div id="rpc-panel">
+      <div style="display:flex;gap:12px;height:100%">
+        <div style="width:280px;overflow:auto;border-right:1px solid var(--border);padding-right:12px">
+          <h3 style="font-size:13px;color:var(--text-dim);margin-bottom:8px">RPC Functions</h3>
+          <ul id="rpc-list"></ul>
+        </div>
+        <div style="flex:1">
+          <h3 style="font-size:13px;color:var(--text-dim);margin-bottom:8px" id="rpc-title">Select an RPC function</h3>
+          <div id="rpc-test">
+            <textarea id="rpc-params" placeholder='{"param_name": "value"}'>{}</textarea>
+            <div style="margin-top:6px">
+              <button class="tb-btn" onclick="callRPC()" style="background:var(--accent);color:#000;font-weight:600">Execute</button>
+              <span id="rpc-status" style="margin-left:8px;font-size:12px;color:var(--text-dim)"></span>
+            </div>
+            <div id="rpc-output"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Auth tab -->
+    <div id="auth-panel">
+      <h3 style="font-size:14px;margin-bottom:12px;color:var(--text-bright)">Auth Settings & Login</h3>
+      <div style="margin-bottom:16px">
+        <button class="tb-btn" onclick="loadAuthSettings()" style="background:var(--accent);color:#000;font-weight:600">Load Auth Settings</button>
+        <button class="tb-btn" onclick="probeSchemas()" style="margin-left:6px">Probe All Schemas</button>
+        <button class="tb-btn" onclick="listBuckets()" style="margin-left:6px">List Storage Buckets</button>
+      </div>
+      <div style="margin-bottom:16px;padding:12px;background:var(--bg-dark);border-radius:6px">
+        <h4 style="font-size:13px;color:var(--text-dim);margin-bottom:8px">Sign Up / Login (get JWT)</h4>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input id="auth-email" placeholder="email@mailinator.com">
+          <input id="auth-pass" placeholder="password" type="password">
+          <button onclick="authSignup()">Sign Up</button>
+          <button onclick="authLogin()">Login</button>
+        </div>
+        <div id="auth-jwt-result" style="margin-top:8px;font-size:12px;color:var(--text-dim)"></div>
+      </div>
+      <pre id="auth-output" style="min-height:100px"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Cell detail modal -->
+<div id="cell-modal" onclick="if(event.target===this)closeCellModal()">
+  <div id="cell-modal-content">
+    <button class="close-btn" onclick="closeCellModal()">✕</button>
+    <h4 style="margin-bottom:8px;font-size:13px;color:var(--text-dim)" id="cell-modal-title"></h4>
+    <pre id="cell-modal-body"></pre>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// State
+let S = {
+  url: '', key: '', jwt: '',
+  schema: 'public',
+  tables: [], rpcs: [], columns: {}, rowCounts: {},
+  currentTable: null, currentData: [],
+  page: 0, pageSize: 100, totalRows: 0,
+  sortCol: null, sortDir: 'asc',
+  selectedRpc: null,
+  allSchemaInfo: {}
+};
+
+// --- Connection ---
+async function connect() {
+  let url = document.getElementById('url-input').value.trim().replace(/\/+$/, '');
+  let key = document.getElementById('key-input').value.trim();
+  let jwt = document.getElementById('jwt-input').value.trim();
+  if (!url || !key) { toast('Enter URL and API key', 'error'); return; }
+  if (!url.startsWith('http')) url = 'https://' + url;
+  S.url = url; S.key = key; S.jwt = jwt || key;
+  setStatus('Connecting...', '');
+  try {
+    await loadSchema();
+    setStatus(`Connected · ${S.tables.length} tables · ${S.rpcs.length} RPCs`, 'ok');
+    renderTableList();
+    const welcome = document.getElementById('welcome');
+    if (welcome) welcome.style.display = 'none';
+    saveSession();
+    renderHistory();
+  } catch(e) {
+    setStatus('Connection failed: ' + e.message, 'err');
+  }
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('conn-status');
+  el.textContent = msg; el.className = cls;
+}
+
+function headers(extra = {}) {
+  const h = { 'apikey': S.key, 'Authorization': 'Bearer ' + S.jwt };
+  if (S.schema !== 'public') h['Accept-Profile'] = S.schema;
+  return { ...h, ...extra };
+}
+
+async function apiFetch(path, opts = {}) {
+  const h = headers(opts.headers || {});
+  const resp = await fetch(S.url + path, { ...opts, headers: h });
+  return resp;
+}
+
+// --- Schema loading ---
+async function loadSchema() {
+  const resp = await apiFetch('/rest/v1/', { headers: { 'Accept-Profile': S.schema } });
+  if (!resp.ok) throw new Error('Schema fetch failed: ' + resp.status);
+  const schema = await resp.json();
+
+  S.tables = []; S.rpcs = []; S.columns = {};
+
+  if (schema.paths) {
+    for (const [path, methods] of Object.entries(schema.paths)) {
+      if (path.startsWith('/rpc/')) {
+        S.rpcs.push(path.replace('/rpc/', ''));
+      } else if (path.startsWith('/')) {
+        const name = path.replace('/', '');
+        if (!name) continue;
+        S.tables.push(name);
+        // Extract columns from GET response schema
+        const getDef = methods.get;
+        if (getDef && getDef.parameters) {
+          const cols = [];
+          for (const p of getDef.parameters) {
+            if (p.in === 'query' && p.name !== 'select' && p.name !== 'order' &&
+                p.name !== 'limit' && p.name !== 'offset' && p.name !== 'on_conflict' &&
+                p.name !== 'or' && p.name !== 'and' && p.name !== 'not.or' && p.name !== 'not.and') {
+              cols.push({ name: p.name, type: p.format || p.type || 'text', desc: p.description || '' });
+            }
+          }
+          S.columns[name] = cols;
+        }
+        // Also try definitions
+        if (schema.definitions && schema.definitions[name]) {
+          const def = schema.definitions[name];
+          if (def.properties) {
+            const cols = [];
+            for (const [cn, cv] of Object.entries(def.properties)) {
+              cols.push({ name: cn, type: cv.format || cv.type || 'text', desc: cv.description || '' });
+            }
+            S.columns[name] = cols;
+          }
+        }
+      }
+    }
+  }
+
+  S.tables.sort();
+  S.rpcs.sort();
+  document.getElementById('table-count').textContent = S.tables.length + ' tables';
+  document.getElementById('rpc-count').textContent = S.rpcs.length + ' RPCs';
+  renderRpcList();
+}
+
+// --- Sidebar ---
+function renderTableList() {
+  const search = document.getElementById('table-search').value.toLowerCase();
+  const list = document.getElementById('table-list');
+  list.innerHTML = '';
+
+  // Tables section
+  const section = document.createElement('div');
+  section.className = 'sidebar-section';
+  section.textContent = 'Tables';
+  list.appendChild(section);
+
+  const filtered = S.tables.filter(t => t.toLowerCase().includes(search));
+  for (const t of filtered) {
+    const el = document.createElement('div');
+    el.className = 'tbl-item' + (t === S.currentTable ? ' active' : '');
+    const cachedCount = S.rowCounts[S.schema + '.' + t];
+    const countText = cachedCount !== undefined ? Number(cachedCount).toLocaleString() : '...';
+    el.innerHTML = `<span><span class="icon">◫</span>${t}</span><span class="count" id="cnt-${t}">${countText}</span>`;
+    el.onclick = () => selectTable(t);
+    list.appendChild(el);
+    // Only fetch count if not cached
+    if (cachedCount === undefined) loadRowCount(t);
+  }
+}
+
+async function loadRowCount(table) {
+  const cacheKey = S.schema + '.' + table;
+  try {
+    const resp = await apiFetch(`/rest/v1/${encodeURIComponent(table)}?select=*&limit=0`, {
+      headers: { 'Prefer': 'count=exact', 'Accept-Profile': S.schema }
+    });
+    const range = resp.headers.get('content-range');
+    if (range) {
+      const m = range.match(/\/(\d+)/);
+      if (m) {
+        S.rowCounts[cacheKey] = parseInt(m[1]);
+        const el = document.getElementById('cnt-' + table);
+        if (el) el.textContent = Number(m[1]).toLocaleString();
+        saveSession();
+      }
+    }
+  } catch(e) {}
+}
+
+function filterTables() { renderTableList(); }
+function clearCountCache() { S.rowCounts = {}; }
+
+async function switchSchema() {
+  S.schema = document.getElementById('schema-select').value;
+  S.currentTable = null;
+  try {
+    clearCountCache();
+    await loadSchema();
+    renderTableList();
+    document.getElementById('grid-wrap').innerHTML = '';
+    document.getElementById('toolbar').style.display = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    toast(`Switched to ${S.schema} schema (${S.tables.length} tables)`, 'success');
+    saveSession();
+  } catch(e) {
+    toast('Schema not accessible: ' + e.message, 'error');
+    S.tables = []; S.rpcs = [];
+    renderTableList();
+  }
+}
+
+// --- Table data ---
+async function selectTable(name) {
+  S.currentTable = name;
+  S.page = 0;
+  S.sortCol = null;
+  document.getElementById('filter-input').value = '';
+  renderTableList();
+  // Update column select
+  const colSelect = document.getElementById('select-cols');
+  colSelect.innerHTML = '<option value="*">All columns</option>';
+  if (S.columns[name]) {
+    for (const c of S.columns[name]) {
+      colSelect.innerHTML += `<option value="${c.name}">${c.name} (${c.type})</option>`;
+    }
+  }
+  await loadData();
+}
+
+async function loadData() {
+  if (!S.currentTable) return;
+  const table = S.currentTable;
+  const offset = S.page * S.pageSize;
+  const filter = document.getElementById('filter-input').value.trim();
+  const selVal = document.getElementById('select-cols').value;
+  const select = selVal === '*' ? '*' : selVal;
+
+  let path = `/rest/v1/${encodeURIComponent(table)}?select=${select}&limit=${S.pageSize}&offset=${offset}`;
+  if (S.sortCol) path += `&order=${S.sortCol}.${S.sortDir}`;
+  if (filter) path += '&' + filter;
+
+  document.getElementById('toolbar').style.display = 'flex';
+  document.getElementById('pagination').style.display = 'flex';
+  document.getElementById('grid-wrap').innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+
+  try {
+    const resp = await apiFetch(path, { headers: { 'Prefer': 'count=exact' } });
+    const range = resp.headers.get('content-range');
+    let total = 0;
+    if (range) { const m = range.match(/\/(\d+)/); if (m) total = parseInt(m[1]); }
+    S.totalRows = total;
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      document.getElementById('grid-wrap').innerHTML = `<div class="loading" style="color:var(--danger)">Error: ${err.message || resp.status}<br><small>${err.details || ''}</small></div>`;
+      return;
+    }
+
+    const data = await resp.json();
+    S.currentData = data;
+
+    document.getElementById('cur-table-name').textContent = table;
+    document.getElementById('cur-row-info').textContent =
+      `${total.toLocaleString()} rows · showing ${offset + 1}–${Math.min(offset + data.length, total)}`;
+
+    renderGrid(data);
+    updatePagination();
+  } catch(e) {
+    document.getElementById('grid-wrap').innerHTML = `<div class="loading" style="color:var(--danger)">Error: ${e.message}</div>`;
+  }
+}
+
+function renderGrid(data) {
+  const wrap = document.getElementById('grid-wrap');
+  wrap.innerHTML = '';
+  const tbl = document.createElement('table');
+  tbl.id = 'grid';
+  const thead = document.createElement('thead');
+  const tbody = document.createElement('tbody');
+
+  if (!data.length) {
+    wrap.innerHTML = '<div class="loading">No rows returned</div>';
+    return;
+  }
+
+  const cols = Object.keys(data[0]);
+
+  // Header
+  const tr = document.createElement('tr');
+  const numTh = document.createElement('th');
+  numTh.textContent = '#';
+  numTh.style.width = '40px';
+  numTh.style.color = 'var(--text-dim)';
+  tr.appendChild(numTh);
+
+  for (const col of cols) {
+    const th = document.createElement('th');
+    th.textContent = col;
+    if (S.sortCol === col) {
+      th.innerHTML += `<span class="sort-arrow">${S.sortDir === 'asc' ? '▲' : '▼'}</span>`;
+    }
+    th.onclick = () => { toggleSort(col); };
+    th.title = getColType(col);
+    tr.appendChild(th);
+  }
+  thead.appendChild(tr);
+
+  // Rows
+  const offset = S.page * S.pageSize;
+  data.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    const numTd = document.createElement('td');
+    numTd.textContent = offset + i + 1;
+    numTd.style.color = 'var(--text-dim)';
+    numTd.style.fontSize = '11px';
+    tr.appendChild(numTd);
+
+    for (const col of cols) {
+      const td = document.createElement('td');
+      const val = row[col];
+      if (val === null || val === undefined) {
+        td.textContent = 'NULL';
+        td.className = 'null-val';
+      } else if (typeof val === 'boolean') {
+        td.textContent = val.toString();
+        td.className = 'bool-val ' + (val ? 'bool-true' : 'bool-false');
+      } else if (typeof val === 'number') {
+        td.textContent = val;
+        td.className = 'num-val';
+      } else if (typeof val === 'object') {
+        td.textContent = JSON.stringify(val);
+        td.className = 'json-val';
+      } else {
+        td.textContent = val;
+      }
+      td.onclick = () => showCellDetail(col, val);
+      td.title = 'Click to expand';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+
+  tbl.appendChild(thead);
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+}
+
+function getColType(col) {
+  if (!S.currentTable || !S.columns[S.currentTable]) return '';
+  const c = S.columns[S.currentTable].find(x => x.name === col);
+  return c ? c.type : '';
+}
+
+function toggleSort(col) {
+  if (S.sortCol === col) {
+    S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    S.sortCol = col;
+    S.sortDir = 'asc';
+  }
+  loadData();
+}
+
+// --- Pagination ---
+function updatePagination() {
+  const totalPages = Math.ceil(S.totalRows / S.pageSize);
+  document.getElementById('page-info').textContent =
+    `Page ${S.page + 1} of ${totalPages || 1}`;
+  document.getElementById('prev-btn').disabled = S.page === 0;
+  document.getElementById('next-btn').disabled = S.page >= totalPages - 1;
+  document.getElementById('total-rows').textContent = `Total: ${S.totalRows.toLocaleString()} rows`;
+}
+
+function prevPage() { if (S.page > 0) { S.page--; loadData(); } }
+function nextPage() {
+  const totalPages = Math.ceil(S.totalRows / S.pageSize);
+  if (S.page < totalPages - 1) { S.page++; loadData(); }
+}
+function changePageSize() {
+  S.pageSize = parseInt(document.getElementById('page-size-select').value);
+  S.page = 0;
+  loadData();
+}
+
+// --- Filter ---
+function clearFilter() {
+  document.getElementById('filter-input').value = '';
+  S.page = 0;
+  loadData();
+}
+
+// --- Cell detail modal ---
+function showCellDetail(col, val) {
+  document.getElementById('cell-modal-title').textContent = col;
+  const body = document.getElementById('cell-modal-body');
+  if (val === null || val === undefined) {
+    body.textContent = 'NULL';
+  } else if (typeof val === 'object') {
+    body.textContent = JSON.stringify(val, null, 2);
+  } else {
+    body.textContent = String(val);
+  }
+  document.getElementById('cell-modal').className = 'show';
+}
+function closeCellModal() {
+  document.getElementById('cell-modal').className = '';
+}
+
+// --- Tabs ---
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
+  document.getElementById('data-tab').style.display = tab === 'data' ? 'flex' : 'none';
+  document.getElementById('rpc-panel').className = tab === 'rpcs' ? 'show' : '';
+  document.getElementById('auth-panel').className = tab === 'auth' ? 'show' : '';
+}
+
+// --- RPCs ---
+function renderRpcList() {
+  const list = document.getElementById('rpc-list');
+  list.innerHTML = '';
+  for (const rpc of S.rpcs) {
+    const li = document.createElement('li');
+    li.textContent = rpc;
+    li.onclick = () => selectRpc(rpc);
+    list.appendChild(li);
+  }
+}
+
+function selectRpc(name) {
+  S.selectedRpc = name;
+  document.getElementById('rpc-title').textContent = `rpc/${name}`;
+  document.getElementById('rpc-output').textContent = '';
+  document.getElementById('rpc-status').textContent = '';
+}
+
+async function callRPC() {
+  if (!S.selectedRpc) { toast('Select an RPC first', 'error'); return; }
+  const params = document.getElementById('rpc-params').value;
+  document.getElementById('rpc-status').textContent = 'Executing...';
+
+  try {
+    let body;
+    try { body = JSON.parse(params); } catch(e) { toast('Invalid JSON', 'error'); return; }
+
+    const resp = await apiFetch(`/rest/v1/rpc/${S.selectedRpc}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const status = resp.status;
+    let result;
+    const text = await resp.text();
+    try { result = JSON.parse(text); } catch(e) { result = text; }
+
+    document.getElementById('rpc-status').textContent = `HTTP ${status}`;
+    document.getElementById('rpc-status').style.color = status < 300 ? 'var(--accent)' : 'var(--danger)';
+    document.getElementById('rpc-output').textContent = typeof result === 'object' ? JSON.stringify(result, null, 2) : result;
+  } catch(e) {
+    document.getElementById('rpc-status').textContent = 'Error';
+    document.getElementById('rpc-output').textContent = e.message;
+  }
+}
+
+// --- Auth tab ---
+async function loadAuthSettings() {
+  const out = document.getElementById('auth-output');
+  out.textContent = 'Loading...';
+  try {
+    const resp = await apiFetch('/auth/v1/settings');
+    const data = await resp.json();
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch(e) { out.textContent = 'Error: ' + e.message; }
+}
+
+async function probeSchemas() {
+  const out = document.getElementById('auth-output');
+  out.textContent = 'Probing schemas...\n';
+  const schemas = ['public', 'storage', 'auth', 'vault', '_realtime', 'pgsodium',
+    'graphql_public', 'extensions', 'supabase_functions', 'pgbouncer'];
+  for (const s of schemas) {
+    try {
+      const resp = await fetch(S.url + '/rest/v1/', {
+        headers: { 'apikey': S.key, 'Authorization': 'Bearer ' + S.jwt, 'Accept-Profile': s }
+      });
+      out.textContent += `${s}: HTTP ${resp.status} ${resp.status === 200 ? '✓ ACCESSIBLE' : resp.status === 406 ? '✗ BLOCKED' : '? ' + resp.statusText}\n`;
+    } catch(e) {
+      out.textContent += `${s}: ERROR ${e.message}\n`;
+    }
+  }
+}
+
+async function listBuckets() {
+  const out = document.getElementById('auth-output');
+  out.textContent = 'Loading buckets...';
+  try {
+    const resp = await apiFetch('/storage/v1/bucket');
+    const data = await resp.json();
+    if (data.length === 0) {
+      out.textContent = 'No storage buckets found (empty array).';
+    } else {
+      out.textContent = JSON.stringify(data, null, 2);
+    }
+  } catch(e) { out.textContent = 'Error: ' + e.message; }
+}
+
+async function authSignup() {
+  const email = document.getElementById('auth-email').value;
+  const pass = document.getElementById('auth-pass').value;
+  if (!email || !pass) { toast('Enter email and password', 'error'); return; }
+  const out = document.getElementById('auth-output');
+  out.textContent = 'Signing up...';
+  try {
+    const resp = await fetch(S.url + '/auth/v1/signup', {
+      method: 'POST',
+      headers: { 'apikey': S.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await resp.json();
+    out.textContent = JSON.stringify(data, null, 2);
+    if (data.access_token) {
+      S.jwt = data.access_token;
+      document.getElementById('jwt-input').value = data.access_token;
+      document.getElementById('auth-jwt-result').textContent = 'JWT obtained! Set as active token.';
+      document.getElementById('auth-jwt-result').style.color = 'var(--accent)';
+      toast('Signed up! JWT set as active token.', 'success');
+    }
+  } catch(e) { out.textContent = 'Error: ' + e.message; }
+}
+
+async function authLogin() {
+  const email = document.getElementById('auth-email').value;
+  const pass = document.getElementById('auth-pass').value;
+  if (!email || !pass) { toast('Enter email and password', 'error'); return; }
+  const out = document.getElementById('auth-output');
+  out.textContent = 'Logging in...';
+  try {
+    const resp = await fetch(S.url + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'apikey': S.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await resp.json();
+    out.textContent = JSON.stringify(data, null, 2);
+    if (data.access_token) {
+      S.jwt = data.access_token;
+      document.getElementById('jwt-input').value = data.access_token;
+      document.getElementById('auth-jwt-result').textContent = 'JWT obtained! Set as active token.';
+      document.getElementById('auth-jwt-result').style.color = 'var(--accent)';
+      toast('Logged in! JWT set as active token.', 'success');
+    }
+  } catch(e) { out.textContent = 'Error: ' + e.message; }
+}
+
+// --- Export ---
+function exportCSV() {
+  if (!S.currentData.length) { toast('No data to export', 'error'); return; }
+  const cols = Object.keys(S.currentData[0]);
+  const escape = v => {
+    if (v === null || v === undefined) return '';
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  let csv = cols.join(',') + '\n';
+  for (const row of S.currentData) {
+    csv += cols.map(c => escape(row[c])).join(',') + '\n';
+  }
+  downloadFile(csv, `${S.currentTable}_page${S.page + 1}.csv`, 'text/csv');
+  toast(`Exported ${S.currentData.length} rows to CSV`, 'success');
+}
+
+function exportJSON() {
+  if (!S.currentData.length) { toast('No data to export', 'error'); return; }
+  const json = JSON.stringify(S.currentData, null, 2);
+  downloadFile(json, `${S.currentTable}_page${S.page + 1}.json`, 'application/json');
+  toast(`Exported ${S.currentData.length} rows to JSON`, 'success');
+}
+
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// --- Toast ---
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.className = '', 3000);
+}
+
+// --- Keyboard shortcuts ---
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeCellModal();
+});
+
+// --- LocalStorage persistence ---
+const LS_KEY = 'supabase-explorer';
+
+function saveSession() {
+  const data = {
+    url: S.url, key: S.key, jwt: S.jwt === S.key ? '' : S.jwt,
+    schema: S.schema, currentTable: S.currentTable,
+    rowCounts: S.rowCounts,
+    history: loadHistory()
+  };
+  // Add current connection to history (no duplicates, max 20)
+  if (S.url && S.key) {
+    const entry = { url: S.url, key: S.key, label: S.url.replace('https://','').replace('.supabase.co',''), ts: Date.now() };
+    data.history = data.history.filter(h => h.url !== S.url || h.key !== S.key);
+    data.history.unshift(entry);
+    data.history = data.history.slice(0, 20);
+  }
+  localStorage.setItem(LS_KEY, JSON.stringify(data));
+}
+
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch(e) { return {}; }
+}
+
+function loadHistory() {
+  const s = loadSession();
+  return s.history || [];
+}
+
+function renderHistory() {
+  const hist = loadHistory();
+  const sel = document.getElementById('history-select');
+  sel.innerHTML = '<option value="">Recent connections...</option>';
+  for (const h of hist) {
+    const ago = timeAgo(h.ts);
+    sel.innerHTML += `<option value="${h.url}|||${h.key}">${h.label} (${ago})</option>`;
+  }
+}
+
+function selectHistory() {
+  const val = document.getElementById('history-select').value;
+  if (!val) return;
+  const [url, key] = val.split('|||');
+  document.getElementById('url-input').value = url;
+  document.getElementById('key-input').value = key;
+  document.getElementById('history-select').value = '';
+  connect();
+}
+
+function timeAgo(ts) {
+  const d = Date.now() - ts;
+  if (d < 60000) return 'just now';
+  if (d < 3600000) return Math.floor(d/60000) + 'm ago';
+  if (d < 86400000) return Math.floor(d/3600000) + 'h ago';
+  return Math.floor(d/86400000) + 'd ago';
+}
+
+// --- Init ---
+(function init() {
+  // 1. URL params take priority
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('url')) document.getElementById('url-input').value = params.get('url');
+  if (params.get('key')) document.getElementById('key-input').value = params.get('key');
+
+  // 2. Otherwise restore from localStorage
+  if (!params.get('url')) {
+    const saved = loadSession();
+    if (saved.url) document.getElementById('url-input').value = saved.url;
+    if (saved.key) document.getElementById('key-input').value = saved.key;
+    if (saved.jwt) document.getElementById('jwt-input').value = saved.jwt;
+    if (saved.schema) document.getElementById('schema-select').value = saved.schema;
+    if (saved.rowCounts) S.rowCounts = saved.rowCounts;
+  }
+
+  // 3. Render history dropdown
+  renderHistory();
+
+  // 4. Auto-connect if we have url+key
+  const url = document.getElementById('url-input').value;
+  const key = document.getElementById('key-input').value;
+  if (url && key) connect();
+})();
+</script>
+</body>
+</html>
