@@ -2,6 +2,8 @@
 
 A standalone HTML database browser for Supabase — like Supabase Studio, but runs from a single file with no server or dependencies.
 
+![Supabase Explorer](image.png)
+
 ## Quick Start
 
 1. Open `supabase-explorer.html` in any browser
