@@ -92,11 +92,26 @@ input, select, textarea { font-family:inherit; }
 }
 #toolbar .table-name { font-size:15px; font-weight:600; color:var(--text-bright); }
 #toolbar .row-info { font-size:12px; color:var(--text-dim); }
+#filter-wrap { position:relative; flex:1; min-width:200px; }
 #filter-input {
-  flex:1; min-width:200px; padding:5px 8px; background:var(--bg-input);
+  width:100%; padding:5px 8px; background:var(--bg-input);
   border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:12px;
 }
 #filter-input::placeholder { color:var(--text-dim); }
+#filter-ac {
+  display:none; position:absolute; top:100%; left:0; right:0; z-index:999;
+  background:var(--bg-sidebar); border:1px solid var(--border); border-top:none;
+  border-radius:0 0 4px 4px; max-height:220px; overflow-y:auto;
+}
+#filter-ac .ac-item {
+  padding:5px 10px; font-size:12px; color:var(--text); cursor:pointer;
+  display:flex; justify-content:space-between;
+}
+#filter-ac .ac-item:hover, #filter-ac .ac-item.active {
+  background:var(--accent); color:#fff;
+}
+#filter-ac .ac-item .ac-hint { color:var(--text-dim); font-size:11px; }
+#filter-ac .ac-item:hover .ac-hint, #filter-ac .ac-item.active .ac-hint { color:rgba(255,255,255,.7); }
 .tb-btn {
   padding:4px 10px; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
   border-radius:4px; font-size:12px;
@@ -270,7 +285,7 @@ td.json-val { color:var(--warning); font-family:monospace; font-size:12px; }
     </div>
     <div id="table-list"></div>
     <div id="sidebar-footer">
-      <span id="table-count">0 tables</span> · <span id="rpc-count">0 RPCs</span>
+      <span id="table-count">0 tables</span> · <span id="rpc-count">0 RPCs</span> <button id="refresh-all-btn" onclick="refreshAllCounts()" style="padding:2px 8px;background:var(--accent);color:#000;border-radius:3px;font-size:11px;margin-left:4px;">Refresh All</button>
     </div>
   </div>
 
@@ -288,7 +303,10 @@ td.json-val { color:var(--warning); font-family:monospace; font-size:12px; }
       <div id="toolbar" style="display:none">
         <span class="table-name" id="cur-table-name"></span>
         <span class="row-info" id="cur-row-info"></span>
-        <input id="filter-input" placeholder="Filter: column=eq.value  |  email=ilike.%@gmail%  |  or=(status.eq.active,role.eq.admin)" onkeydown="if(event.key==='Enter')loadData()">
+        <div id="filter-wrap">
+          <input id="filter-input" placeholder="Filter: column=eq.value  |  email=ilike.%@gmail%  |  or=(status.eq.active,role.eq.admin)" onkeydown="filterKeydown(event)" oninput="filterAutocomplete()" onfocus="filterAutocomplete()">
+          <div id="filter-ac"></div>
+        </div>
         <button class="tb-btn" onclick="loadData()" title="Apply filter">Apply</button>
         <button class="tb-btn" onclick="clearFilter()" title="Clear filter">Clear</button>
         <select id="select-cols" class="tb-btn" onchange="loadData()" title="Columns">
@@ -415,6 +433,7 @@ async function connect() {
     await loadSchema();
     setStatus(`Connected · ${S.tables.length} tables · ${S.rpcs.length} RPCs`, 'ok');
     renderTableList();
+    refreshAllCounts();
     const welcome = document.getElementById('welcome');
     if (welcome) welcome.style.display = 'none';
     saveSession();
@@ -444,7 +463,17 @@ async function apiFetch(path, opts = {}) {
 // --- Schema loading ---
 async function loadSchema() {
   const resp = await apiFetch('/rest/v1/', { headers: { 'Accept-Profile': S.schema } });
-  if (!resp.ok) throw new Error('Schema fetch failed: ' + resp.status);
+  if (!resp.ok) {
+    let detail = ''; let errMsg = '';
+    let hint = '';
+    try { const j = await resp.json(); errMsg = j.message || ''; hint = j.hint || ''; detail = errMsg ? ' — ' + errMsg + (hint ? ' (' + hint + ')' : '') : ''; } catch(e){}
+    // Service-role-only schema: fall back to GraphQL introspection
+    if (resp.status === 401 && hint.includes('service_role')) {
+      toast('Schema endpoint locked — trying GraphQL introspection…', 'info');
+      return await loadSchemaFromGraphQL();
+    }
+    throw new Error('Schema fetch failed: ' + resp.status + detail);
+  }
   const schema = await resp.json();
 
   S.tables = []; S.rpcs = []; S.columns = {};
@@ -488,6 +517,59 @@ async function loadSchema() {
   S.tables.sort();
   S.rpcs.sort();
   document.getElementById('table-count').textContent = S.tables.length + ' tables';
+  document.getElementById('rpc-count').textContent = S.rpcs.length + ' RPCs';
+  renderRpcList();
+}
+
+async function loadSchemaFromGraphQL() {
+  const gqlResp = await fetch(S.url + '/graphql/v1', {
+    method: 'POST',
+    headers: { 'apikey': S.key, 'Authorization': 'Bearer ' + S.jwt, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: `{
+      __schema {
+        queryType { fields { name type { ofType { name fields { name type { name kind ofType { name } } } } } } }
+        mutationType { fields { name } }
+      }
+    }` })
+  });
+  if (!gqlResp.ok) throw new Error('GraphQL introspection also failed: ' + gqlResp.status + ' (schema endpoint requires service_role key)');
+  const gql = await gqlResp.json();
+  if (gql.errors) {
+    // Introspection disabled — nothing we can do without service_role
+    const msg = gql.errors[0]?.message || 'introspection disabled';
+    throw new Error('Schema locked and GraphQL introspection disabled: ' + msg + '. Use the service_role key to load the schema.');
+  }
+
+  S.tables = []; S.rpcs = []; S.columns = {};
+  const fields = gql.data?.__schema?.queryType?.fields || [];
+  const mutFields = gql.data?.__schema?.mutationType?.fields || [];
+
+  for (const f of fields) {
+    const name = f.name;
+    if (!name || name.startsWith('__')) continue;
+    // GraphQL collections end with "Collection" in Supabase
+    const tableName = name.endsWith('Collection') ? name.replace(/Collection$/, '') : name;
+    if (!S.tables.includes(tableName)) S.tables.push(tableName);
+    // Extract columns from nested type fields
+    const typeFields = f.type?.ofType?.fields || [];
+    if (typeFields.length) {
+      S.columns[tableName] = typeFields.map(tf => ({
+        name: tf.name,
+        type: tf.type?.ofType?.name || tf.type?.name || 'text',
+        desc: ''
+      }));
+    }
+  }
+  // RPCs show up as mutations
+  for (const f of mutFields) {
+    if (f.name && !f.name.startsWith('__') && !f.name.startsWith('insert') &&
+        !f.name.startsWith('update') && !f.name.startsWith('delete')) {
+      S.rpcs.push(f.name);
+    }
+  }
+
+  S.tables.sort(); S.rpcs.sort();
+  document.getElementById('table-count').textContent = S.tables.length + ' tables (via GraphQL)';
   document.getElementById('rpc-count').textContent = S.rpcs.length + ' RPCs';
   renderRpcList();
 }
@@ -539,6 +621,19 @@ async function loadRowCount(table) {
 
 function filterTables() { renderTableList(); }
 function clearCountCache() { S.rowCounts = {}; }
+
+async function refreshAllCounts() {
+  const btn = document.getElementById('refresh-all-btn');
+  if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
+  const batch = 10;
+  for (let i = 0; i < S.tables.length; i += batch) {
+    const chunk = S.tables.slice(i, i + batch);
+    await Promise.all(chunk.map(t => loadRowCount(t)));
+    if (btn) btn.textContent = `${Math.min(i + batch, S.tables.length)}/${S.tables.length}`;
+  }
+  if (btn) { btn.textContent = 'Refresh All'; btn.disabled = false; }
+  renderTableList();
+}
 
 async function switchSchema() {
   S.schema = document.getElementById('schema-select').value;
@@ -739,6 +834,117 @@ function clearFilter() {
   loadData();
 }
 
+// --- Filter Autocomplete ---
+const FILTER_OPS = [
+  { op: 'eq', hint: 'equals', ex: 'eq.value' },
+  { op: 'neq', hint: 'not equal', ex: 'neq.value' },
+  { op: 'gt', hint: 'greater than', ex: 'gt.100' },
+  { op: 'gte', hint: 'greater or equal', ex: 'gte.100' },
+  { op: 'lt', hint: 'less than', ex: 'lt.100' },
+  { op: 'lte', hint: 'less or equal', ex: 'lte.100' },
+  { op: 'like', hint: 'pattern (case sensitive)', ex: 'like.*value*' },
+  { op: 'ilike', hint: 'pattern (case insensitive)', ex: 'ilike.%value%' },
+  { op: 'is', hint: 'null check', ex: 'is.null' },
+  { op: 'in', hint: 'in list', ex: 'in.(a,b,c)' },
+  { op: 'not.eq', hint: 'not equals', ex: 'not.eq.value' },
+  { op: 'not.is', hint: 'not null', ex: 'not.is.null' },
+];
+
+let acIndex = -1;
+
+function filterAutocomplete() {
+  const input = document.getElementById('filter-input');
+  const ac = document.getElementById('filter-ac');
+  const val = input.value;
+  const cols = (S.currentTable && S.columns[S.currentTable]) || [];
+  if (!cols.length) { ac.style.display = 'none'; return; }
+
+  let items = [];
+  acIndex = -1;
+
+  // Check if cursor is after "=" — suggest operators
+  const eqPos = val.lastIndexOf('=');
+  if (eqPos !== -1 && val.indexOf('=') === eqPos) {
+    const afterEq = val.slice(eqPos + 1);
+    const colPart = val.slice(0, eqPos);
+    if (cols.some(c => c.name === colPart || c.name === colPart.trim())) {
+      items = FILTER_OPS
+        .filter(o => !afterEq || o.op.startsWith(afterEq) || o.hint.includes(afterEq.toLowerCase()))
+        .map(o => ({ label: `${colPart}=${o.ex}`, display: o.op, hint: o.hint }));
+    }
+  }
+
+  // No "=" yet or no operator match — suggest column names
+  if (!items.length && (eqPos === -1 || val.indexOf('=') !== eqPos)) {
+    const query = val.toLowerCase();
+    items = cols
+      .filter(c => !query || c.name.toLowerCase().includes(query))
+      .slice(0, 15)
+      .map(c => ({ label: c.name + '=', display: c.name, hint: c.type || '' }));
+  }
+
+  if (!items.length) { ac.style.display = 'none'; return; }
+
+  ac.innerHTML = items.map((it, i) =>
+    `<div class="ac-item" data-i="${i}" onmousedown="pickAc(${i})">`
+    + `<span>${it.display}</span><span class="ac-hint">${it.hint}</span></div>`
+  ).join('');
+  ac.style.display = 'block';
+  ac._items = items;
+}
+
+function pickAc(i) {
+  const ac = document.getElementById('filter-ac');
+  const input = document.getElementById('filter-input');
+  if (ac._items && ac._items[i]) {
+    input.value = ac._items[i].label;
+    input.focus();
+    // Place cursor at end
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+  ac.style.display = 'none';
+}
+
+function filterKeydown(e) {
+  const ac = document.getElementById('filter-ac');
+  const items = ac.querySelectorAll('.ac-item');
+
+  if (ac.style.display === 'block' && items.length) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      acIndex = Math.min(acIndex + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('active', i === acIndex));
+      items[acIndex]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      acIndex = Math.max(acIndex - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('active', i === acIndex));
+      items[acIndex]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && acIndex >= 0)) {
+      e.preventDefault();
+      pickAc(acIndex >= 0 ? acIndex : 0);
+      return;
+    }
+    if (e.key === 'Escape') {
+      ac.style.display = 'none';
+      return;
+    }
+  }
+
+  if (e.key === 'Enter') loadData();
+}
+
+// Close autocomplete on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('#filter-wrap')) {
+    document.getElementById('filter-ac').style.display = 'none';
+  }
+});
+
 // --- Cell detail modal ---
 function showCellDetail(col, val) {
   document.getElementById('cell-modal-title').textContent = col;
@@ -904,27 +1110,60 @@ async function authLogin() {
 }
 
 // --- Export ---
-function exportCSV() {
-  if (!S.currentData.length) { toast('No data to export', 'error'); return; }
-  const cols = Object.keys(S.currentData[0]);
-  const escape = v => {
-    if (v === null || v === undefined) return '';
-    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-    return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  let csv = cols.join(',') + '\n';
-  for (const row of S.currentData) {
-    csv += cols.map(c => escape(row[c])).join(',') + '\n';
+async function fetchAllRows() {
+  const batchSize = 1000;
+  const total = S.totalRows || S.currentData.length;
+  if (total <= S.currentData.length && S.page === 0) return S.currentData;
+
+  const filter = document.getElementById('filter-input').value.trim();
+  const selVal = document.getElementById('select-cols').value;
+  const select = selVal === '*' ? '*' : selVal;
+  const allRows = [];
+  const totalPages = Math.ceil(total / batchSize);
+
+  for (let offset = 0; offset < total; offset += batchSize) {
+    const pageNum = Math.floor(offset / batchSize) + 1;
+    toast(`Fetching ${pageNum}/${totalPages}...`, 'success');
+
+    let path = `/rest/v1/${encodeURIComponent(S.currentTable)}?select=${select}&limit=${batchSize}&offset=${offset}`;
+    if (S.sortCol) path += `&order=${S.sortCol}.${S.sortDir}`;
+    if (filter) path += '&' + filter;
+
+    const resp = await apiFetch(path);
+    const rows = await resp.json();
+    if (!rows.length) break;
+    allRows.push(...rows);
   }
-  downloadFile(csv, `${S.currentTable}_page${S.page + 1}.csv`, 'text/csv');
-  toast(`Exported ${S.currentData.length} rows to CSV`, 'success');
+  return allRows;
 }
 
-function exportJSON() {
+async function exportCSV() {
   if (!S.currentData.length) { toast('No data to export', 'error'); return; }
-  const json = JSON.stringify(S.currentData, null, 2);
-  downloadFile(json, `${S.currentTable}_page${S.page + 1}.json`, 'application/json');
-  toast(`Exported ${S.currentData.length} rows to JSON`, 'success');
+  try {
+    const allRows = await fetchAllRows();
+    const cols = Object.keys(allRows[0]);
+    const escape = v => {
+      if (v === null || v === undefined) return '';
+      const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    let csv = cols.join(',') + '\n';
+    for (const row of allRows) {
+      csv += cols.map(c => escape(row[c])).join(',') + '\n';
+    }
+    downloadFile(csv, `${S.currentTable}_all.csv`, 'text/csv');
+    toast(`Exported ${allRows.length} rows to CSV`, 'success');
+  } catch(e) { toast('Export failed: ' + e.message, 'error'); }
+}
+
+async function exportJSON() {
+  if (!S.currentData.length) { toast('No data to export', 'error'); return; }
+  try {
+    const allRows = await fetchAllRows();
+    const json = JSON.stringify(allRows, null, 2);
+    downloadFile(json, `${S.currentTable}_all.json`, 'application/json');
+    toast(`Exported ${allRows.length} rows to JSON`, 'success');
+  } catch(e) { toast('Export failed: ' + e.message, 'error'); }
 }
 
 function downloadFile(content, filename, type) {
